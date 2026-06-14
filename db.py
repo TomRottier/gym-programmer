@@ -230,7 +230,7 @@ def get_current_program_record() -> dict[str, Any] | None:
     )
 
     if response.data:
-        return response.data[1]
+        return response.data[0]
 
     # Fallback: latest saved program for this user
     fallback_response = (
