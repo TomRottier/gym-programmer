@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -32,7 +32,7 @@ def derive_weights_for_step(
     cycle: Cycle,
     scheme: Scheme,
     step_index: int,
-) -> list[float]:
+    ) -> list[float]:
     tm = training_max_for_cycle(exercise, cycle.index)
     pct_step = scheme.pct[step_index]
     return [tm * float(p) for p in pct_step]
@@ -87,10 +87,20 @@ def session_rows(
     rows: list[tuple[str, str]] = []
 
     for set_index, rep in enumerate(reps_step):
-        rows.append((f"Set {set_index + 1}", format_set_cell(rep, weights[set_index])))
+        rows.append(
+            (
+                f"Set {set_index + 1}",
+                format_set_cell(rep, weights[set_index]),
+            )
+        )
 
+    # Supplemental only applies to normal training weeks, not deload/test weeks.
     if not week_label.startswith("Deload"):
-        supp_label, supp_value = derive_supplemental_value(exercise, cycle, step_index)
+        supp_label, supp_value = derive_supplemental_value(
+            exercise=exercise,
+            cycle=cycle,
+            main_step_index=step_index,
+        )
         if supp_label is not None and supp_value is not None:
             rows.append((supp_label, supp_value))
 
@@ -135,6 +145,9 @@ def build_sessions(
     completed_program_weeks = 0
 
     for cycle in program.cycles:
+        # ------------------------------
+        # Main weeks
+        # ------------------------------
         for step_index, reps_step in enumerate(cycle.main.reps):
             program_week_number = completed_program_weeks + step_index + 1
             week_label = f"Week {step_index + 1}"
@@ -146,6 +159,7 @@ def build_sessions(
                     scheme=cycle.main,
                     step_index=step_index,
                 )
+
                 sessions.append(
                     session_rows(
                         exercise=exercise,
@@ -161,6 +175,9 @@ def build_sessions(
 
         completed_program_weeks += len(cycle.main.reps)
 
+        # ------------------------------
+        # Deload / test week
+        # ------------------------------
         if cycle.deload is not None:
             reps_step = cycle.deload.reps[0]
             week_label = f"Deload – {cycle.deload.name}"
@@ -174,6 +191,7 @@ def build_sessions(
                     scheme=cycle.deload,
                     step_index=0,
                 )
+
                 sessions.append(
                     session_rows(
                         exercise=exercise,
@@ -196,11 +214,15 @@ def build_sessions(
 # AMRAP loading / saving
 # ==========================================================
 
-def ensure_amrap_results_loaded(program_id: int) -> dict[tuple[int, str, int, int], int]:
+def ensure_amrap_results_loaded(
+    program_id: int,
+) -> dict[tuple[int, str, int, int], int]:
     loaded_program_id = st.session_state.get("loaded_amrap_program_id")
+
     if loaded_program_id != program_id:
         st.session_state.loaded_amrap_results = get_amrap_results(program_id)
         st.session_state.loaded_amrap_program_id = program_id
+
     return st.session_state.get("loaded_amrap_results", {})
 
 
@@ -218,6 +240,7 @@ def table_to_df(sessions: list[dict[str, Any]]) -> pd.DataFrame:
     ]
 
     raw_fields: list[str] = []
+
     for session in sessions:
         for label, _ in session["rows"]:
             if label not in seen:
@@ -236,7 +259,9 @@ def table_to_df(sessions: list[dict[str, Any]]) -> pd.DataFrame:
 
     for session in sessions:
         row_map = {label: value for label, value in session["rows"]}
-        data[session["exercise_name"]] = [row_map.get(field, "") for field in field_order]
+        data[session["exercise_name"]] = [
+            row_map.get(field, "") for field in field_order
+        ]
 
     return pd.DataFrame(data)
 
@@ -252,6 +277,7 @@ def render_combined_table(
     column_config: dict[str, Any] = {
         "Field": st.column_config.TextColumn(width="small")
     }
+
     for col in exercise_cols:
         column_config[col] = st.column_config.TextColumn(width="small")
 
@@ -274,7 +300,7 @@ def collect_amrap_results(
 ) -> list[dict[str, object]]:
     collected: dict[tuple[int, str, int, int], dict[str, object]] = {}
 
-    # Start with existing values for sessions not currently visible
+    # Keep existing AMRAP values for sessions not currently visible.
     for session in all_sessions:
         if session.get("set_index") is None:
             continue
@@ -291,6 +317,7 @@ def collect_amrap_results(
             session["step_index"],
             session["set_index"],
         )
+
         collected[key] = {
             "cycle_index": session["cycle_index"],
             "exercise_name": session["exercise_name"],
@@ -301,7 +328,7 @@ def collect_amrap_results(
             "actual_reps": int(raw_value),
         }
 
-    # Overwrite with visible edited values
+    # Overwrite with values edited in currently visible tables.
     for edited_df, sessions in visible_edited_tables.values():
         if "AMRAP" not in edited_df["Field"].values:
             continue
@@ -313,6 +340,7 @@ def collect_amrap_results(
                 continue
 
             raw_value = str(amrap_row.get(session["exercise_name"], "")).strip()
+
             key = (
                 session["cycle_index"],
                 session["exercise_name"],
@@ -353,7 +381,12 @@ def render_week_group(
         f"{table_prefix}_cycle{week_sessions[0]['cycle_index']}"
         f"_week{week_sessions[0]['week_label']}"
     )
-    render_combined_table(week_sessions, table_key, visible_edited_tables)
+
+    render_combined_table(
+        week_sessions,
+        table_key,
+        visible_edited_tables,
+    )
 
 
 def render_cycle_view(
@@ -361,6 +394,7 @@ def render_cycle_view(
     visible_edited_tables: dict[str, tuple[pd.DataFrame, list[dict[str, Any]]]],
 ) -> None:
     week_groups: dict[str, list[dict[str, Any]]] = {}
+
     for session in cycle_sessions:
         week_groups.setdefault(session["week_label"], []).append(session)
 
@@ -375,6 +409,7 @@ def render_program_view(
     visible_edited_tables: dict[str, tuple[pd.DataFrame, list[dict[str, Any]]]],
 ) -> None:
     cycle_groups: dict[int, list[dict[str, Any]]] = {}
+
     for session in all_sessions:
         cycle_groups.setdefault(session["cycle_index"], []).append(session)
 
@@ -388,6 +423,22 @@ def render_program_view(
 # Current week defaults
 # ==========================================================
 
+def normalise_start_date(value: Any) -> date | None:
+    if value is None:
+        return None
+
+    if isinstance(value, date):
+        return value
+
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+
+    return None
+
+
 def get_current_program_week(start_date: date | None, total_weeks: int) -> int:
     if start_date is None:
         return 1
@@ -398,8 +449,10 @@ def get_current_program_week(start_date: date | None, total_weeks: int) -> int:
 
     if current_week < 1:
         return 1
+
     if current_week > total_weeks:
         return total_weeks
+
     return current_week
 
 
@@ -425,6 +478,20 @@ def get_default_cycle_and_week_label(
     return matching["cycle_index"], matching["week_label"]
 
 
+def sync_tracking_defaults(
+    default_cycle: int,
+    default_week_label: str,
+    program_identity: str,
+) -> None:
+    target = (program_identity, default_cycle, default_week_label)
+
+    if st.session_state.get("tracking_default_target") != target:
+        st.session_state["tracking_default_target"] = target
+        st.session_state["tracking_cycle_select"] = default_cycle
+        st.session_state["tracking_week_select"] = default_week_label
+        st.session_state["tracking_view_mode"] = "Week"
+
+
 # ==========================================================
 # Main render
 # ==========================================================
@@ -433,11 +500,14 @@ def render_program_tracking() -> None:
     st.header("Program Tracking")
 
     program = st.session_state.get("program")
+
     if not isinstance(program, Program):
         program = load_current_program_into_session()
+
         if not isinstance(program, Program):
             st.write("No program generated yet. Go to Program Creation.")
             return
+
         st.session_state.program = program
 
     saved_program_id = st.session_state.get("saved_program_id")
@@ -446,17 +516,30 @@ def render_program_tracking() -> None:
     if saved_program_id is not None:
         amrap_defaults = ensure_amrap_results_loaded(saved_program_id)
 
-    start_date = st.session_state.get("start_date")
+    start_date = normalise_start_date(st.session_state.get("start_date"))
     all_sessions = build_sessions(program, amrap_defaults)
+
     default_cycle, default_week_label = get_default_cycle_and_week_label(
         all_sessions,
         start_date,
     )
 
-    # Top actions
-    action_left, action_mid, action_load = st.columns([1, 1, 1])
+    program_identity = (
+        f"program_{saved_program_id}"
+        if saved_program_id is not None
+        else "draft"
+    )
 
-    save_amrap_clicked = False
+    sync_tracking_defaults(
+        default_cycle=default_cycle,
+        default_week_label=default_week_label,
+        program_identity=program_identity,
+    )
+
+    # ------------------------------
+    # Top actions
+    # ------------------------------
+    action_left, action_mid, action_load = st.columns([1, 1, 1])
 
     with action_left:
         if st.button("Save Program to Database", use_container_width=True):
@@ -471,7 +554,10 @@ def render_program_tracking() -> None:
                 st.error(str(exc))
 
     with action_mid:
-        save_amrap_clicked = st.button("Save AMRAP Results", use_container_width=True)
+        save_amrap_clicked = st.button(
+            "Save AMRAP Results",
+            use_container_width=True,
+        )
 
     with action_load:
         if st.button("Load Saved Program", use_container_width=True):
@@ -480,22 +566,27 @@ def render_program_tracking() -> None:
                 if loaded_program is None:
                     st.error("No saved program found in database.")
                 else:
+                    st.session_state.tracking_default_target = None
                     st.success("Loaded saved program.")
                     st.rerun()
             except Exception as exc:
                 st.error(str(exc))
 
+    # ------------------------------
     # Horizontal controls
-    controls_label, controls_left, controls_mid, controls_right = st.columns([0.3, 1, 1, 1])
+    # ------------------------------
+    controls_label, controls_left, controls_mid, controls_right = st.columns(
+        [0.5, 1, 1, 1]
+    )
 
     with controls_label:
-        st.markdown("**View:**")
+        st.markdown("**View**")
 
     with controls_left:
         view_mode = st.selectbox(
             "View",
             ["Week", "Cycle", "Program"],
-            index=0,
+            key="tracking_view_mode",
             label_visibility="collapsed",
         )
 
@@ -504,64 +595,113 @@ def render_program_tracking() -> None:
     cycle_numbers = sorted({session["cycle_index"] for session in all_sessions})
     cycle_labels = {n: f"Cycle {n}" for n in cycle_numbers}
 
+    if (
+        "tracking_cycle_select" not in st.session_state
+        or st.session_state["tracking_cycle_select"] not in cycle_numbers
+    ):
+        st.session_state["tracking_cycle_select"] = default_cycle
+
+    # ------------------------------
+    # Week view
+    # ------------------------------
     if view_mode == "Week":
         with controls_mid:
-            default_cycle_index = cycle_numbers.index(default_cycle) if default_cycle in cycle_numbers else 0
             selected_cycle = st.selectbox(
                 "Cycle",
                 cycle_numbers,
-                index=default_cycle_index,
+                key="tracking_cycle_select",
                 format_func=lambda x: cycle_labels[x],
                 label_visibility="collapsed",
             )
 
-        cycle_sessions = [s for s in all_sessions if s["cycle_index"] == selected_cycle]
+        cycle_sessions = [
+            s for s in all_sessions if s["cycle_index"] == selected_cycle
+        ]
 
         week_options: list[str] = []
         seen_week_labels: set[str] = set()
+
         for session in cycle_sessions:
             label = session["week_label"]
             if label not in seen_week_labels:
                 seen_week_labels.add(label)
                 week_options.append(label)
 
+        if (
+            "tracking_week_select" not in st.session_state
+            or st.session_state["tracking_week_select"] not in week_options
+        ):
+            st.session_state["tracking_week_select"] = (
+                default_week_label
+                if default_week_label in week_options
+                else week_options[0]
+            )
+
         with controls_right:
-            default_week_index = week_options.index(default_week_label) if default_week_label in week_options else 0
             selected_week = st.selectbox(
                 "Week",
                 week_options,
-                index=default_week_index,
+                key="tracking_week_select",
                 label_visibility="collapsed",
             )
 
-        week_sessions = [s for s in cycle_sessions if s["week_label"] == selected_week]
-        render_week_group(week_sessions, "week_view", visible_edited_tables)
+        week_sessions = [
+            s for s in cycle_sessions if s["week_label"] == selected_week
+        ]
 
+        render_week_group(
+            week_sessions,
+            "week_view",
+            visible_edited_tables,
+        )
+
+    # ------------------------------
+    # Cycle view
+    # ------------------------------
     elif view_mode == "Cycle":
         with controls_mid:
-            default_cycle_index = cycle_numbers.index(default_cycle) if default_cycle in cycle_numbers else 0
             selected_cycle = st.selectbox(
                 "Cycle",
                 cycle_numbers,
-                index=default_cycle_index,
+                key="tracking_cycle_select",
                 format_func=lambda x: cycle_labels[x],
                 label_visibility="collapsed",
             )
 
-        cycle_sessions = [s for s in all_sessions if s["cycle_index"] == selected_cycle]
-        render_cycle_view(cycle_sessions, visible_edited_tables)
+        cycle_sessions = [
+            s for s in all_sessions if s["cycle_index"] == selected_cycle
+        ]
 
+        render_cycle_view(
+            cycle_sessions,
+            visible_edited_tables,
+        )
+
+    # ------------------------------
+    # Program view
+    # ------------------------------
     else:
-        render_program_view(all_sessions, visible_edited_tables)
+        render_program_view(
+            all_sessions,
+            visible_edited_tables,
+        )
 
+    # ------------------------------
+    # Save AMRAP results
+    # ------------------------------
     if save_amrap_clicked:
         if saved_program_id is None:
             st.error("Save program to database first.")
         else:
             try:
-                results = collect_amrap_results(all_sessions, visible_edited_tables)
+                results = collect_amrap_results(
+                    all_sessions,
+                    visible_edited_tables,
+                )
                 replace_amrap_results(saved_program_id, results)
-                st.session_state.loaded_amrap_results = get_amrap_results(saved_program_id)
+                st.session_state.loaded_amrap_results = get_amrap_results(
+                    saved_program_id
+                )
                 st.session_state.loaded_amrap_program_id = saved_program_id
                 st.success("AMRAP results saved.")
             except Exception as exc:

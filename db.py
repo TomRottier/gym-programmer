@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import streamlit as st
@@ -173,6 +173,8 @@ def save_program(program: Program) -> int:
         "is_current", True
     ).execute()
 
+    start_date = st.session_state.get("start_date")
+
     program_insert = client.table("programs").insert(
         {
             "user_id": user_id,
@@ -180,6 +182,7 @@ def save_program(program: Program) -> int:
             "created_at": created_at,
             "is_current": True,
             "program_json": payload,
+            "start_date": start_date.isoformat() if start_date is not None else None,
         }
     ).execute()
 
@@ -267,6 +270,10 @@ def load_current_program_into_session() -> Program | None:
     program = program_from_dict(payload_dict)
     st.session_state.program = program
     st.session_state.saved_program_id = int(record["id"])
+    saved_start_date = record.get("start_date")
+    if saved_start_date:
+        st.session_state.start_date = date.fromisoformat(saved_start_date)
+
     return program
 
 

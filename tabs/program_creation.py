@@ -1,4 +1,5 @@
 import streamlit as st
+from datetime import date
 
 from logic.program_templates import (
     PROGRAM_TEMPLATES,
@@ -30,7 +31,14 @@ def render_program_creation():
     )
     st.session_state.program_name = program_name
 
-    start_date = st.date_input("Program Start Date")
+    if "start_date" not in st.session_state:
+        st.session_state.start_date = date.today()
+
+    start_date = st.date_input(
+        "Program Start Date",
+        value=st.session_state.start_date,
+    )
+
     st.session_state.start_date = start_date
 
     st.divider()
