@@ -27,11 +27,28 @@ def _new_client() -> Client:
 
 def _get_client() -> Client:
     client = _new_client()
+
     access_token = st.session_state.get("supabase_access_token")
     refresh_token = st.session_state.get("supabase_refresh_token")
 
     if access_token and refresh_token:
-        client.auth.set_session(access_token, refresh_token)
+        try:
+            client.auth.set_session(access_token, refresh_token)
+        except Exception:
+            refreshed = client.auth.refresh_session(refresh_token)
+
+            if refreshed.session is None or refreshed.user is None:
+                raise ValueError("Authentication session expired. Please sign in again.")
+
+            st.session_state.supabase_access_token = refreshed.session.access_token
+            st.session_state.supabase_refresh_token = refreshed.session.refresh_token
+            st.session_state.user_id = refreshed.user.id
+            st.session_state.user_email = refreshed.user.email
+
+            client.auth.set_session(
+                refreshed.session.access_token,
+                refreshed.session.refresh_token,
+            )
 
     return client
 
@@ -75,7 +92,6 @@ def sign_out_user() -> None:
     ]:
         if key in st.session_state:
             del st.session_state[key]
-
 
 # ------------------------------
 # Serialization
